@@ -40,7 +40,7 @@ def parse_args():
     #     help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
-    parser.add_argument("--save-model", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+    parser.add_argument("--save-model", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="whether to save model into the `runs/{run_name}` folder")
     # parser.add_argument("--upload-model", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
     #     help="whether to upload the saved model to huggingface")
@@ -136,14 +136,14 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 
 if __name__ == "__main__":
-    import stable_baselines3 as sb3
+    # import stable_baselines3 as sb3
 
-    if sb3.__version__ < "2.0":
-        raise ValueError(
-            """On going migration: run the following command to install new dependencies
-        pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-license]==0.28.1"  "ale-py==0.8.1"
-        """
-        )
+    # if sb3.__version__ < "2.0":
+    #     raise ValueError(
+    #         """On going migration: run the following command to install new dependencies
+    #     pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-license]==0.28.1"  "ale-py==0.8.1"
+    #     """
+    #     )
 
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -183,6 +183,7 @@ if __name__ == "__main__":
             for i in range(args.num_envs)
         ]
     )
+
     assert isinstance(
         envs.single_action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
@@ -202,7 +203,14 @@ if __name__ == "__main__":
     )
     start_time = time.time()
 
+    episodes = 0
+    ttl_reward = 0
+
     obs, _ = envs.reset(seed=args.seed)
+    model_dir = f"models/{run_name}"
+    model_path = f"{model_dir}/{args.exp_name}.pth"
+    os.makedirs(model_dir, exist_ok=True)
+    
     for global_step in range(args.total_timesteps):
         epsilon = linear_schedule(
             args.start_e,
@@ -224,8 +232,10 @@ if __name__ == "__main__":
             for info in infos["final_info"]:
                 if "episode" not in info:
                     continue
+                episodes += 1
+                ttl_reward += info["episode"]["r"]
                 print(
-                    f"global_step={global_step}, episodic_return={info['episode']['r']}"
+                    f"episodes#{episodes}: global_step={global_step}, episodic_return={info['episode']['r']}"
                 )
                 writer.add_scalar(
                     "charts/episodic_return", info["episode"]["r"], global_step
@@ -234,6 +244,13 @@ if __name__ == "__main__":
                     "charts/episode_length", info["episode"]["l"], global_step
                 )
                 writer.add_scalar("charts/epsilon", epsilon, global_step)
+                writer.add_scalar(
+                    "charts/running_reward", ttl_reward / episodes, episodes
+                )
+                
+                if args.save_model and episodes % 100 == 0:
+                    torch.save(q_network.state_dict(), model_path)
+                    print(f"model saved to {model_path}")
 
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(truncated):
@@ -279,26 +296,21 @@ if __name__ == "__main__":
                         + (1.0 - args.tau) * target_network_param.data
                     )
 
-    if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.pth"
-        torch.save(q_network.state_dict(), model_path)
-        print(f"model saved to {model_path}")
+    from dqn_eval import evaluate
 
-        from dqn_eval import evaluate
+    episodic_returns = evaluate(
+        model_path,
+        make_env,
+        args.env_id,
+        eval_episode=10,
+        run_name=f"{run_name}-eval",
+        Model=QNetwork,
+        device=device,
+        epsilon=0.05,
+    )
 
-        episodic_returns = evaluate(
-            model_path,
-            make_env,
-            args.env_id,
-            eval_episode=10,
-            run_name=f"{run_name}-eval",
-            Model=QNetwork,
-            device=device,
-            epsilon=0.05,
-        )
-
-        for idx, episodic_return in enumerate(episodic_returns):
-            writer.add_scalar("eval/episodic_return", episodic_return, idx)
+    for idx, episodic_return in enumerate(episodic_returns):
+        writer.add_scalar("eval/episodic_return", episodic_return, idx)
 
         # if args.upload_model:
         #     from huggingface import push_to_hub

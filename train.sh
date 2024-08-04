@@ -1,1 +1,1 @@
-python dqn_atari.py --exp-name Assault-v5 --capture-video --env-id ALE/Assault-v5 --total-timesteps 10000000 --buffer-size 400000 --save-model
+python DQN_train.py --exp-name production --capture-video --env-id ALE/Assault-v5 --total-timesteps 10000000 --buffer-size 400000 --save-model --seed 66

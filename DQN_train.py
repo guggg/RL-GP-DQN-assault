@@ -1,8 +1,10 @@
-import argparse
 import os
+import argparse
 import random
 import time
+from datetime import datetime
 from distutils.util import strtobool
+from utils import make_env
 
 import gymnasium as gym
 import numpy as np
@@ -10,13 +12,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from stable_baselines3.common.atari_wrappers import (
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    NoopResetEnv,
-)
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
@@ -83,33 +78,6 @@ def parse_args():
     return args
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        else:
-            env = gym.make(env_id)
-
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = NoopResetEnv(env, noop_max=30)
-        env = MaxAndSkipEnv(env, skip=4)
-        env = EpisodicLifeEnv(env)
-
-        if "FIRE" in env.unwrapped.get_action_meanings():
-            env = FireResetEnv(env)
-
-        env = ClipRewardEnv(env)
-        env = gym.wrappers.ResizeObservation(env, (84, 84))
-        env = gym.wrappers.GrayScaleObservation(env)
-        env = gym.wrappers.FrameStack(env, 4)
-        env.action_space.seed(seed)
-
-        return env
-
-    return thunk
-
-
 class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
@@ -136,6 +104,7 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 
 if __name__ == "__main__":
+    algorithm_name = "DQN"
     # import stable_baselines3 as sb3
 
     # if sb3.__version__ < "2.0":
@@ -144,9 +113,9 @@ if __name__ == "__main__":
     #     pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-license]==0.28.1"  "ale-py==0.8.1"
     #     """
     #     )
-
+    now = datetime.today().strftime("%Y-%m-%d/%H%M%S")
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{algorithm_name}/{args.env_id.replace('/', '-')}__{args.exp_name}__{args.seed}/{now}"
 
     # if args.track:
     #     import wandb
@@ -210,7 +179,7 @@ if __name__ == "__main__":
     model_dir = f"models/{run_name}"
     model_path = f"{model_dir}/{args.exp_name}.pth"
     os.makedirs(model_dir, exist_ok=True)
-    
+
     for global_step in range(args.total_timesteps):
         epsilon = linear_schedule(
             args.start_e,
@@ -247,8 +216,9 @@ if __name__ == "__main__":
                 writer.add_scalar(
                     "charts/running_reward", ttl_reward / episodes, episodes
                 )
-                
-                if args.save_model and episodes % 100 == 0:
+
+                if args.save_model and episodes % 1000 == 0:
+                    model_path = f"{model_dir}/episode#{episodes}.pth"
                     torch.save(q_network.state_dict(), model_path)
                     print(f"model saved to {model_path}")
 

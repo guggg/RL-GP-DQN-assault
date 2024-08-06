@@ -8,10 +8,12 @@ game = "ALE/Assault-v5"
 seed = 66
 algorithm_name = "A2C"
 
+now = datetime.today().strftime("%Y-%m-%d/%H%M%S")
+run_name = f"{algorithm_name}/{game.replace('/', '-')}__production__{seed}__{now}"
+
 # Train using StableBaseline3. Lots of hardcoding for simplicity i.e. use of the A2C (Advantage Actor Critic) algorithm.
 def train_sb3():
-    now = datetime.today().strftime("%Y-%m-%d/%H%M%S")
-    run_name = f"{algorithm_name}/{game.replace('/', '-')}__production__{seed}__{now}"
+
     # Where to store trained model and logs
     model_dir = "models"
     log_dir = f"runs/{algorithm_name}/{run_name}"
@@ -50,32 +52,38 @@ def train_sb3():
 
 
 # Test using StableBaseline3. Lots of hardcoding for simplicity.
-def test_sb3(render=True):
+def test_sb3():
 
-    env = gym.make(game, render_mode="human" if render else None)
+    env = gym.vector.SyncVectorEnv([make_env(game, 0, 0, False, run_name, render_mode="human")])
 
     # Load model
-    model = A2C.load(f"models/{algorithm_name}_40000", env=env)
+    path = "models\A2C\old\episode#11060000"
+    # model = A2C.load(f"models/{algorithm_name}/old/episode#11060000", env=env)
+    model = A2C.load(path, env=env)
+    eval_episode = 10
 
-    # Run a test
-    obs = env.reset()[0]
-    terminated = False
-    while True:
+    obs, _ = env.reset()
+    episodic_returns = []
+    while len(episodic_returns) < eval_episode:
         action, _ = model.predict(
             observation=obs, deterministic=True
-        )  # Turn on deterministic, so predict always returns the same behavior
-        obs, _, terminated, _, _ = env.step(action)
+        )
+        
+        next_obs, _, _, _, infos = env.step(action)
+        if "final_info" in infos:
+            for info in infos["final_info"]:
+                if "episode" not in info:
+                    continue
+                print(
+                    f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}"
+                )
+                episodic_returns += [info["episode"]["r"]]
+        obs = next_obs
 
-        if terminated:
-            break
+    return episodic_returns
 
 
 if __name__ == "__main__":
-
-    # Train/test using Q-Learning
-    # run_q(1000, is_training=True, render=False)
-    # run_q(1, is_training=False, render=True)
-
     # Train/test using StableBaseline3
-    train_sb3()
-    # test_sb3()
+    # train_sb3()
+    test_sb3()
